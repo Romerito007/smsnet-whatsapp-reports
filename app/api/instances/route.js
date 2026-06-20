@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { listInstances } from "@/lib/gateway";
+import { gatewayInfo } from "@/lib/gateway";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    return NextResponse.json({ instances: listInstances() });
+    return NextResponse.json(gatewayInfo());
   } catch (e) {
-    return NextResponse.json({ instances: [], error: e.message });
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

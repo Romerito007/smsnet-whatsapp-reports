@@ -3,21 +3,24 @@ import { gatewayFetch } from "@/lib/gateway";
 
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
-  const port = body._port;
-  const wid = body._wid;
+  const port = body._port ?? process.env.GATEWAY_BOOTSTRAP_PORT;
+  const wid = body._wid ?? process.env.GATEWAY_BOOTSTRAP_WID;
   delete body._port;
   delete body._wid;
 
   if (!wid) {
     return NextResponse.json(
-      { error: "Selecione a instância (WID) para autenticar." },
+      {
+        error:
+          "Informe _wid no body ou configure GATEWAY_BOOTSTRAP_WID no servidor para listar instâncias.",
+      },
       { status: 400 }
     );
   }
 
   try {
     const { ok, status, data } = await gatewayFetch(
-      "/queued-ledger/stats",
+      "/instances/list",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

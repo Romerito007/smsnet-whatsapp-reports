@@ -238,6 +238,8 @@ export default function Dashboard() {
   }
 
   const effectivePort = port.trim();
+  const instanceHasNoConsumer =
+    !!selectedInstance && !(Number(selectedInstance.consumerId) > 0);
 
   const filteredInstances = instances.filter((it) =>
     matchesFilter(it, instanceFilter)
@@ -263,8 +265,11 @@ export default function Dashboard() {
     setSelectedKey(value);
     setPort(item.srvPort != null ? String(item.srvPort) : "");
     setWid(item.wid != null ? String(item.wid) : "");
-    setConsumer(item.consumerId != null ? String(item.consumerId) : "");
-    setQueueNames(item.queueName ?? "");
+    const hasConsumer = Number(item.consumerId) > 0;
+    setConsumer(hasConsumer ? String(item.consumerId) : "");
+    setQueueNames(
+      item.queueName && item.queueName !== "consumer_0" ? item.queueName : ""
+    );
   }
 
   function handlePortChange(v) {
@@ -282,13 +287,17 @@ export default function Dashboard() {
     clearSelection();
   }
 
+  function parseConsumerIds(str) {
+    return String(str || "").split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+  }
+
   function applyShared(body) {
-    if (wid.trim()) body.wids = [wid.trim()];
-    if (consumer.trim()) {
-      const ids = consumer
-        .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => !isNaN(n));
+    const w = wid.trim();
+    if (w) body.wids = [w];
+    if (!instanceHasNoConsumer) {
+      const ids = parseConsumerIds(consumer);
       if (ids.length) body.consumerIds = ids;
     }
     if (queueNames.trim()) {
@@ -302,7 +311,7 @@ export default function Dashboard() {
     if (dateStart) body[ks] = toISO(dateStart);
     if (dateEnd) body[ke] = toISO(dateEnd);
     body._port = effectivePort;
-    body._wid = selectedInstance?.wid || wid.trim() || undefined;
+    body._wid = selectedInstance?.wid || w || undefined;
   }
 
   function buildStatsBody() {
@@ -338,15 +347,16 @@ export default function Dashboard() {
         throw new Error("JSON avançado de busca inválido.");
       }
     }
-    if (wid.trim() && body.wid == null && body.wids == null) body.wid = wid.trim();
-    if (consumer.trim() && body.consumerId == null && body.consumerIds == null) {
-      const id = Number(consumer.split(",")[0].trim());
-      if (!isNaN(id)) body.consumerId = id;
+    const w = wid.trim();
+    if (w && body.wid == null && body.wids == null) body.wid = w;
+    if (!instanceHasNoConsumer && body.consumerId == null && body.consumerIds == null) {
+      const ids = parseConsumerIds(consumer);
+      if (ids.length) body.consumerId = ids[0];
     }
     if (searchPhone.trim() && body.phone == null) body.phone = searchPhone.trim();
     if (body.limit == null && Number(searchLimit) > 0) body.limit = Number(searchLimit);
     body._port = effectivePort;
-    body._wid = selectedInstance?.wid || wid.trim() || undefined;
+    body._wid = selectedInstance?.wid || w || undefined;
     return body;
   }
 
@@ -366,9 +376,19 @@ export default function Dashboard() {
       setError("Selecione a instância (WID) para autenticar.");
       return;
     }
-    if (tab === "stats" && !consumer.trim()) {
-      setError("Informe o consumer.");
-      return;
+    if (tab === "stats") {
+      if (instanceHasNoConsumer) {
+        if (!wid.trim()) {
+          setError("Esta instância está sem consumer; informe/selecione o WID.");
+          return;
+        }
+      } else {
+        const hasConsumer = parseConsumerIds(consumer).length > 0;
+        if (!hasConsumer && !wid.trim()) {
+          setError("Informe o WID ou o consumer.");
+          return;
+        }
+      }
     }
     setLoading(true);
     try {
@@ -555,6 +575,13 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* ── No-consumer warning ── */}
+        {instanceHasNoConsumer && (
+          <div className="warn-box" style={{ marginBottom: 10 }}>
+            Esta instância está sem consumer vinculado — a consulta será feita só pelo WID.
+          </div>
+        )}
+
         {/* ── Active-instance summary ── */}
         {selectedInstance && (
           <div
@@ -622,7 +649,9 @@ export default function Dashboard() {
                 id="consumer"
                 value={consumer}
                 onChange={(e) => handleConsumerChange(e.target.value)}
-                placeholder="ex.: 2202, 1356"
+                placeholder={instanceHasNoConsumer ? "— sem consumer (consulta por WID) —" : "ex.: 2202, 1356"}
+                readOnly={instanceHasNoConsumer}
+                style={instanceHasNoConsumer ? { color: "var(--muted)", background: "var(--surface-2)", cursor: "default" } : undefined}
               />
             </div>
             <div className="field mono">
@@ -794,7 +823,12 @@ export default function Dashboard() {
             ))}
 
           {tab === "cancel" && (
-            <CancelPanel port={effectivePort} wid={effectiveWid} consumer={consumer} />
+            <CancelPanel
+              port={effectivePort}
+              wid={effectiveWid}
+              consumer={consumer}
+              instanceHasNoConsumer={instanceHasNoConsumer}
+            />
           )}
         </div>
       </div>

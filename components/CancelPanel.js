@@ -8,7 +8,7 @@ function parseIds(str) {
   return (str || "")
     .split(",")
     .map((s) => Number(s.trim()))
-    .filter((n) => !isNaN(n) && n > 0);
+    .filter((n) => Number.isInteger(n) && n > 0);
 }
 function splitCsv(str) {
   return (str || "")
@@ -32,7 +32,7 @@ async function postCancel(body) {
   return data;
 }
 
-export default function CancelPanel({ port, wid, consumer }) {
+export default function CancelPanel({ port, wid, consumer, instanceHasNoConsumer }) {
   const [consumerIds, setConsumerIds] = useState(consumer || "");
   const [queueNames, setQueueNames] = useState("");
   const [messageKind, setMessageKind] = useState("billing");
@@ -51,7 +51,7 @@ export default function CancelPanel({ port, wid, consumer }) {
   function build(dryRun) {
     if (!wid) throw new Error("Selecione a instância (WID) para autenticar.");
     if (!port) throw new Error("Informe a porta da instância.");
-    const ids = parseIds(consumerIds);
+    const ids = instanceHasNoConsumer ? [] : parseIds(consumerIds);
     const queues = splitCsv(queueNames);
     if (ids.length === 0 && queues.length === 0) {
       throw new Error("Informe Consumer ID(s) ou Queue name(s).");

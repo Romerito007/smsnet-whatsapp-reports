@@ -32,7 +32,7 @@ async function postCancel(body) {
   return data;
 }
 
-export default function CancelPanel({ port, consumer }) {
+export default function CancelPanel({ port, wid, consumer }) {
   const [consumerIds, setConsumerIds] = useState(consumer || "");
   const [queueNames, setQueueNames] = useState("");
   const [messageKind, setMessageKind] = useState("billing");
@@ -49,6 +49,7 @@ export default function CancelPanel({ port, consumer }) {
   const [error, setError] = useState("");
 
   function build(dryRun) {
+    if (!wid) throw new Error("Selecione a instância (WID) para autenticar.");
     if (!port) throw new Error("Informe a porta da instância.");
     const ids = parseIds(consumerIds);
     const queues = splitCsv(queueNames);
@@ -74,6 +75,7 @@ export default function CancelPanel({ port, consumer }) {
     if (includeSending) body.includeSending = true;
     if (phone.trim()) body.phone = phone.trim();
     if (port) body._port = port;
+    if (wid) body._wid = wid;
     return body;
   }
 
@@ -102,7 +104,7 @@ export default function CancelPanel({ port, consumer }) {
     const total = dryResult?.affectedTotal;
     const ok = window.confirm(
       `Cancelar (${mode}) ${total != null ? total : "?"} mensagem(ns)?\n\n` +
-        `Porta: ${port}\nMotivo: ${reason.trim()}\n\n` +
+        `WID: ${wid} · Porta: ${port}\nMotivo: ${reason.trim()}\n\n` +
         "Esta ação altera os registros no gateway."
     );
     if (!ok) return;

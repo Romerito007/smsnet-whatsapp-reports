@@ -297,6 +297,7 @@ export default function Dashboard() {
     if (dateStart) body[ks] = toISO(dateStart);
     if (dateEnd) body[ke] = toISO(dateEnd);
     body._port = effectivePort;
+    body._wid = selectedInstance?.wid || wid.trim() || undefined;
   }
 
   function buildStatsBody() {
@@ -340,13 +341,24 @@ export default function Dashboard() {
     if (searchPhone.trim() && body.phone == null) body.phone = searchPhone.trim();
     if (body.limit == null && Number(searchLimit) > 0) body.limit = Number(searchLimit);
     body._port = effectivePort;
+    body._wid = selectedInstance?.wid || wid.trim() || undefined;
     return body;
   }
 
+  const effectiveWid = selectedInstance?.wid || wid.trim();
+
   async function run() {
     setError("");
+    if (!effectiveWid && !effectivePort) {
+      setError("Selecione uma instância.");
+      return;
+    }
     if (!effectivePort) {
       setError("Informe a porta da instância.");
+      return;
+    }
+    if (!effectiveWid) {
+      setError("Selecione a instância (WID) para autenticar.");
       return;
     }
     if (tab === "stats" && !consumer.trim()) {
@@ -364,6 +376,7 @@ export default function Dashboard() {
             id: historyId.trim(),
             size: Number(historySize) > 0 ? Number(historySize) : 50,
             _port: effectivePort,
+            _wid: selectedInstance?.wid || wid.trim() || undefined,
           })
         );
       } else if (tab === "search") {
@@ -776,7 +789,7 @@ export default function Dashboard() {
             ))}
 
           {tab === "cancel" && (
-            <CancelPanel port={effectivePort} consumer={consumer} />
+            <CancelPanel port={effectivePort} wid={effectiveWid} consumer={consumer} />
           )}
         </div>
       </div>

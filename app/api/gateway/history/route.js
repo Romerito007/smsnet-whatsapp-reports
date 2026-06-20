@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { gatewayFetch } from "@/lib/gateway";
 
 export async function POST(request) {
-  const { id, size, _instance } = await request.json().catch(() => ({}));
+  const { id, size, _port } = await request.json().catch(() => ({}));
   if (!id) {
     return NextResponse.json(
       { error: "Informe o id da conversa/remotejid." },
@@ -14,7 +14,7 @@ export async function POST(request) {
     const { ok, status, data } = await gatewayFetch(
       `/messages/history/${encodeURIComponent(id)}/${sz}`,
       { method: "GET" },
-      _instance
+      _port
     );
     return NextResponse.json(data ?? { error: "Resposta vazia do gateway." }, {
       status: ok ? 200 : status,

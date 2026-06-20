@@ -3,10 +3,9 @@ import { gatewayFetch } from "@/lib/gateway";
 
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
-  const instance = body._instance;
-  delete body._instance;
+  const port = body._port;
+  delete body._port;
 
-  // Trava de segurança: reason é obrigatório e consumerIds OU queueNames também.
   if (!body.reason || !String(body.reason).trim()) {
     return NextResponse.json({ error: "Informe o motivo (reason)." }, { status: 400 });
   }
@@ -27,7 +26,7 @@ export async function POST(request) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       },
-      instance
+      port
     );
     return NextResponse.json(data ?? { error: "Resposta vazia do gateway." }, {
       status: ok ? 200 : status,

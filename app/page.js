@@ -88,10 +88,8 @@ function ResultView({ data }) {
 export default function Dashboard() {
   const router = useRouter();
 
-  // Instâncias
-  const [instances, setInstances] = useState([]);
-  const [instanceUrl, setInstanceUrl] = useState("");
-  const [customUrl, setCustomUrl] = useState("");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
 
   // Filtros compartilhados (stats / histórico / busca)
   const [wid, setWid] = useState("");
@@ -131,16 +129,13 @@ export default function Dashboard() {
     fetch("/api/instances")
       .then((r) => r.json())
       .then((d) => {
-        const list = Array.isArray(d.instances) ? d.instances : [];
-        setInstances(list);
-        if (list.length) setInstanceUrl(list[0].baseUrl);
-        else setInstanceUrl("__custom__");
+        if (d.host) setHost(d.host);
+        if (d.defaultPort) setPort(d.defaultPort);
       })
-      .catch(() => setInstanceUrl("__custom__"));
+      .catch(() => {});
   }, []);
 
-  const effectiveInstance =
-    instanceUrl === "__custom__" ? customUrl.trim() : instanceUrl;
+  const effectivePort = port.trim();
 
   function applyShared(body) {
     if (wid.trim()) body.wids = [wid.trim()];
@@ -161,7 +156,7 @@ export default function Dashboard() {
     const [ks, ke] = DATE_BASIS[dateBasis] || DATE_BASIS.created;
     if (dateStart) body[ks] = toISO(dateStart);
     if (dateEnd) body[ke] = toISO(dateEnd);
-    if (effectiveInstance) body._instance = effectiveInstance;
+    body._port = effectivePort;
   }
 
   function buildStatsBody() {
@@ -204,12 +199,20 @@ export default function Dashboard() {
     }
     if (searchPhone.trim() && body.phone == null) body.phone = searchPhone.trim();
     if (body.limit == null && Number(searchLimit) > 0) body.limit = Number(searchLimit);
-    if (effectiveInstance) body._instance = effectiveInstance;
+    body._port = effectivePort;
     return body;
   }
 
   async function run() {
     setError("");
+    if (!effectivePort) {
+      setError("Informe a porta da instância.");
+      return;
+    }
+    if (tab === "stats" && !consumer.trim()) {
+      setError("Informe o consumer.");
+      return;
+    }
     setLoading(true);
     try {
       if (tab === "stats") {
@@ -220,7 +223,7 @@ export default function Dashboard() {
           await postJSON("/api/gateway/history", {
             id: historyId.trim(),
             size: Number(historySize) > 0 ? Number(historySize) : 50,
-            _instance: effectiveInstance || undefined,
+            _port: effectivePort,
           })
         );
       } else if (tab === "search") {
@@ -266,31 +269,24 @@ export default function Dashboard() {
       <div className="container">
         <div className="instancebar">
           <div className="field">
-            <label htmlFor="inst">Instância (host:porta)</label>
-            <select
-              id="inst"
-              value={instanceUrl}
-              onChange={(e) => setInstanceUrl(e.target.value)}
-            >
-              {instances.map((i) => (
-                <option key={i.baseUrl} value={i.baseUrl}>
-                  {i.label}
-                </option>
-              ))}
-              <option value="__custom__">Custom…</option>
-            </select>
+            <label htmlFor="gw-host">Host do gateway</label>
+            <input
+              id="gw-host"
+              value={host}
+              readOnly
+              placeholder="carregando…"
+            />
           </div>
-          {instanceUrl === "__custom__" && (
-            <div className="field mono grow">
-              <label htmlFor="cust">Endpoint custom</label>
-              <input
-                id="cust"
-                value={customUrl}
-                onChange={(e) => setCustomUrl(e.target.value)}
-                placeholder="http://whatsapp-2-sp.smsnet.com.br:10005"
-              />
-            </div>
-          )}
+          <div className="field mono">
+            <label htmlFor="gw-port">Porta da instância *</label>
+            <input
+              id="gw-port"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              placeholder="ex.: 10005"
+              inputMode="numeric"
+            />
+          </div>
         </div>
 
         <div className="tabs">
@@ -554,8 +550,7 @@ export default function Dashboard() {
               <StatsReport data={statsData} />
             ) : (
               <div className="empty">
-                Escolha a instância, informe WID e/ou consumer e clique em
-                “Sincronizar relatório”.
+                Informe a porta, WID e/ou consumer e clique em "Sincronizar relatório".
               </div>
             ))}
 
@@ -564,7 +559,7 @@ export default function Dashboard() {
               <ResultView data={historyData} />
             ) : (
               <div className="empty">
-                Informe o ID da conversa e clique em “Buscar histórico”.
+                Informe o ID da conversa e clique em "Buscar histórico".
               </div>
             ))}
 
@@ -573,12 +568,12 @@ export default function Dashboard() {
               <ResultView data={searchData} />
             ) : (
               <div className="empty">
-                Defina os filtros de busca e clique em “Buscar mensagens”.
+                Defina os filtros de busca e clique em "Buscar mensagens".
               </div>
             ))}
 
           {tab === "cancel" && (
-            <CancelPanel instanceBaseUrl={effectiveInstance} consumer={consumer} />
+            <CancelPanel port={effectivePort} consumer={consumer} />
           )}
         </div>
       </div>

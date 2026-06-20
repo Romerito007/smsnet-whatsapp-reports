@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import DataTable from "./DataTable";
 import { fmt } from "./format";
 
@@ -17,11 +17,16 @@ function splitCsv(str) {
     .filter(Boolean);
 }
 
-async function postCancel(body) {
+function isAbortError(e) {
+  return e?.name === "AbortError" || e?.message?.includes("aborted");
+}
+
+async function postCancel(body, signal) {
   const res = await fetch("/api/gateway/cancel", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (res.status === 401) {
     window.location.href = "/login";
@@ -32,7 +37,9 @@ async function postCancel(body) {
   return data;
 }
 
-export default function CancelPanel({ port, wid, consumer, queueNames: initialQueueNames }) {
+export default function CancelPanel({ port, wid, consumer, queueNames: initialQueueNames, timeoutSec = 60 }) {
+  const controllerRef = useRef(null);
+
   const [consumerIds, setConsumerIds] = useState(consumer || "");
   const [queueNames, setQueueNames] = useState(initialQueueNames || "");
   const [messageKind, setMessageKind] = useState("billing");
@@ -47,6 +54,7 @@ export default function CancelPanel({ port, wid, consumer, queueNames: initialQu
   const [execResult, setExecResult] = useState(null);
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
+  const [cancelled, setCancelled] = useState(false);
 
   function build(dryRun) {
     if (!wid) throw new Error("Selecione a instância (WID) para autenticar.");
@@ -68,6 +76,7 @@ export default function CancelPanel({ port, wid, consumer, queueNames: initialQu
       mode,
       reason: reason.trim(),
       statuses: statuses.length ? statuses : ["queued", "retryable"],
+      _timeoutMs: timeoutSec * 1000,
     };
     if (ids.length) body.consumerIds = ids;
     if (queues.length) body.queueNames = queues;
@@ -79,14 +88,25 @@ export default function CancelPanel({ port, wid, consumer, queueNames: initialQu
     return body;
   }
 
+  function cancelRequest() {
+    controllerRef.current?.abort();
+  }
+
   async function runDry() {
     setError("");
+    setCancelled(false);
     setExecResult(null);
+    const ctrl = new AbortController();
+    controllerRef.current = ctrl;
     setLoading("dry");
     try {
-      setDryResult(await postCancel(build(true)));
+      setDryResult(await postCancel(build(true), ctrl.signal));
     } catch (e) {
-      setError(e.message);
+      if (isAbortError(e)) {
+        setCancelled(true);
+      } else {
+        setError(e.message);
+      }
       setDryResult(null);
     } finally {
       setLoading("");
@@ -95,8 +115,9 @@ export default function CancelPanel({ port, wid, consumer, queueNames: initialQu
 
   async function runExec() {
     setError("");
+    setCancelled(false);
     try {
-      build(false); // valida antes de confirmar
+      build(false);
     } catch (e) {
       setError(e.message);
       return;
@@ -108,11 +129,17 @@ export default function CancelPanel({ port, wid, consumer, queueNames: initialQu
         "Esta ação altera os registros no gateway."
     );
     if (!ok) return;
+    const ctrl = new AbortController();
+    controllerRef.current = ctrl;
     setLoading("exec");
     try {
-      setExecResult(await postCancel(build(false)));
+      setExecResult(await postCancel(build(false), ctrl.signal));
     } catch (e) {
-      setError(e.message);
+      if (isAbortError(e)) {
+        setCancelled(true);
+      } else {
+        setError(e.message);
+      }
     } finally {
       setLoading("");
     }
@@ -204,12 +231,24 @@ export default function CancelPanel({ port, wid, consumer, queueNames: initialQu
         </div>
 
         <div className="actions">
-          <button className="btn-ghost" onClick={runDry} disabled={!!loading}>
-            {loading === "dry" ? "Simulando…" : "Simular (dry-run)"}
-          </button>
-          <button className="btn danger" onClick={runExec} disabled={!canExec}>
-            {loading === "exec" ? "Executando…" : "Executar cancelamento"}
-          </button>
+          {loading === "dry" ? (
+            <button className="btn-ghost" onClick={cancelRequest} style={{ borderColor: "var(--crit)", color: "var(--crit)" }}>
+              Cancelar
+            </button>
+          ) : (
+            <button className="btn-ghost" onClick={runDry} disabled={!!loading}>
+              Simular (dry-run)
+            </button>
+          )}
+          {loading === "exec" ? (
+            <button className="btn-ghost" onClick={cancelRequest} style={{ borderColor: "var(--crit)", color: "var(--crit)" }}>
+              Cancelar
+            </button>
+          ) : (
+            <button className="btn danger" onClick={runExec} disabled={!canExec}>
+              Executar cancelamento
+            </button>
+          )}
           <span className="spacer" />
         </div>
       </div>
@@ -217,6 +256,11 @@ export default function CancelPanel({ port, wid, consumer, queueNames: initialQu
       {error && (
         <div className="error-box" style={{ marginTop: 16 }}>
           {error}
+        </div>
+      )}
+      {cancelled && !error && (
+        <div className="note" style={{ marginTop: 16, background: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted)", borderRadius: "var(--radius)", padding: "16px 18px", fontSize: 13.5 }}>
+          Requisição cancelada.
         </div>
       )}
 

@@ -32,9 +32,9 @@ async function postCancel(body) {
   return data;
 }
 
-export default function CancelPanel({ port, wid, consumer, instanceHasNoConsumer }) {
+export default function CancelPanel({ port, wid, consumer, queueNames: initialQueueNames }) {
   const [consumerIds, setConsumerIds] = useState(consumer || "");
-  const [queueNames, setQueueNames] = useState("");
+  const [queueNames, setQueueNames] = useState(initialQueueNames || "");
   const [messageKind, setMessageKind] = useState("billing");
   const [stQueued, setStQueued] = useState(true);
   const [stRetryable, setStRetryable] = useState(true);
@@ -51,7 +51,7 @@ export default function CancelPanel({ port, wid, consumer, instanceHasNoConsumer
   function build(dryRun) {
     if (!wid) throw new Error("Selecione a instância (WID) para autenticar.");
     if (!port) throw new Error("Informe a porta da instância.");
-    const ids = instanceHasNoConsumer ? [] : parseIds(consumerIds);
+    const ids = parseIds(consumerIds);
     const queues = splitCsv(queueNames);
     if (ids.length === 0 && queues.length === 0) {
       throw new Error("Informe Consumer ID(s) ou Queue name(s).");

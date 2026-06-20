@@ -163,6 +163,8 @@ export default function Dashboard() {
 
   // Stats advanced
   const [filterByWid, setFilterByWid] = useState(false);
+  const [includeDaily, setIncludeDaily] = useState(false);
+  const [includeHourly, setIncludeHourly] = useState(false);
   const [errorClass, setErrorClass] = useState("");
   const [errorContains, setErrorContains] = useState("");
   const [previewType, setPreviewType] = useState("");
@@ -324,8 +326,8 @@ export default function Dashboard() {
       pageNumber: 1,
       pageSize: Math.min(Math.max(Number(pageSize) || 100, 1), 500),
       includeDetails: true,
-      includeDaily: true,
-      includeHourly: true,
+      includeDaily,
+      includeHourly,
       includeHealth: true,
       includeRecommendations: true,
       includeSmsnetContract: true,
@@ -338,7 +340,7 @@ export default function Dashboard() {
     if (errorClass) body.errorClass = errorClass;
     if (errorContains.trim()) body.errorContains = errorContains.trim();
     if (previewType) body.previewType = previewType;
-    if (phone.trim()) body.phone = phone.trim();
+    if (phone.trim()) body.phones = [phone.trim()];
     return body;
   }
 
@@ -707,7 +709,7 @@ export default function Dashboard() {
                   <label htmlFor="ecn">Erro contém</label>
                   <input id="ecn" value={errorContains} onChange={(e) => setErrorContains(e.target.value)} placeholder="ex.: 463" />
                 </div>
-                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                <div className="field" style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 8 }}>
                   <label className="check" style={{ textTransform: "none", letterSpacing: 0 }}>
                     <input
                       type="checkbox"
@@ -722,6 +724,34 @@ export default function Dashboard() {
                         title="Mostra só o que este WID já processou; oculta mensagens pendentes (queued) ainda não claimadas."
                       >
                         — mostra só o que este WID já processou; oculta pendentes ainda não claimadas
+                      </span>
+                    </span>
+                  </label>
+                  <label className="check" style={{ textTransform: "none", letterSpacing: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={includeDaily}
+                      onChange={(e) => setIncludeDaily(e.target.checked)}
+                      style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
+                    />
+                    <span>
+                      Distribuição diária (byDay)
+                      <span style={{ color: "var(--muted-2)", fontFamily: "var(--sans)", fontSize: 11.5, marginLeft: 8 }}>
+                        — pode ser lento em grandes volumes
+                      </span>
+                    </span>
+                  </label>
+                  <label className="check" style={{ textTransform: "none", letterSpacing: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={includeHourly}
+                      onChange={(e) => setIncludeHourly(e.target.checked)}
+                      style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
+                    />
+                    <span>
+                      Distribuição horária (byHour)
+                      <span style={{ color: "var(--muted-2)", fontFamily: "var(--sans)", fontSize: 11.5, marginLeft: 8 }}>
+                        — pode ser lento em grandes volumes
                       </span>
                     </span>
                   </label>
@@ -756,6 +786,11 @@ export default function Dashboard() {
                 <div className="field mono">
                   <label htmlFor="slm">Limite</label>
                   <input id="slm" value={searchLimit} onChange={(e) => setSearchLimit(e.target.value)} inputMode="numeric" />
+                </div>
+                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", fontStyle: "italic" }}>
+                    Esta aba usa <code style={{ fontStyle: "normal" }}>/messages/search</code> para buscar mensagens já enviadas/recebidas no histórico de conversas. Para localizar mensagens <strong>queued</strong> (pendentes, ainda não enviadas), use a aba <strong>Relatório de envios</strong> com o campo <strong>Telefone</strong>.
+                  </p>
                 </div>
               </>
             )}

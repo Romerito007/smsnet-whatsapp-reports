@@ -62,11 +62,11 @@ function findArray(obj) {
 }
 
 function instanceKey(item) {
-  return `${item.srvPort}|${item.consumerId ?? ""}|${item.wid ?? ""}`;
+  return `${item.consumerId ?? ""}|${item.wid ?? ""}`;
 }
 
 function instanceLabel(item) {
-  let label = `:${item.srvPort} · ${item.name || item.from || "—"} · cons ${item.consumerId ?? "—"}`;
+  let label = `${item.name || item.from || "—"} · cons ${item.consumerId ?? "—"}`;
   if (item.wid) label += ` · wid ${item.wid}`;
   if (item.status) label += ` · ${item.status}`;
   return label;
@@ -80,7 +80,6 @@ function matchesFilter(item, filter) {
     item.from,
     item.wid,
     item.consumerId != null ? String(item.consumerId) : null,
-    item.srvPort != null ? String(item.srvPort) : null,
     item.queueName,
     item.srvName,
   ].some((v) => v && v.toLowerCase().includes(q));
@@ -131,8 +130,6 @@ export default function Dashboard() {
   const router = useRouter();
   const controllerRef = useRef(null);
 
-  const [defaultPort, setDefaultPort] = useState("");
-
   // Instance selector
   const [instances, setInstances] = useState([]);
   const [instancesLoading, setInstancesLoading] = useState(false);
@@ -145,14 +142,10 @@ export default function Dashboard() {
   // Server-side search inputs (committed on button/Enter)
   const [searchWid, setSearchWid] = useState("");
   const [searchConsumer, setSearchConsumer] = useState("");
-  const [searchPort, setSearchPort] = useState("");
   const [committedWid, setCommittedWid] = useState("");
   const [committedConsumer, setCommittedConsumer] = useState("");
-  const [committedPort, setCommittedPort] = useState("");
 
   // Derived from selected instance (readonly in querybar)
-  const [hostInst, setHostInst] = useState("");
-  const [port, setPort] = useState("");
   const [wid, setWid] = useState("");
   const [consumer, setConsumer] = useState("");
   const [queueNames, setQueueNames] = useState("");
@@ -241,10 +234,6 @@ export default function Dashboard() {
           const n = Number(committedConsumer.trim());
           if (!isNaN(n)) body.consumerIds = [n];
         }
-        if (committedPort.trim()) {
-          const n = Number(committedPort.trim());
-          if (!isNaN(n)) body.srvPorts = [n];
-        }
         const resp = await postJSON("/api/gateway/instances", body, ctrl.signal);
         const items = Array.isArray(resp.items)
           ? resp.items
@@ -253,7 +242,7 @@ export default function Dashboard() {
           : Array.isArray(resp.rows)
           ? resp.rows
           : [];
-        allItems.push(...items.filter((it) => it.srvPort != null));
+        allItems.push(...items.filter((it) => it.consumerId != null || it.wid != null));
         if (!resp.pagination?.hasNext) break;
         pageNumber++;
       }
@@ -261,7 +250,7 @@ export default function Dashboard() {
         const aOnline = (a.status || "").toUpperCase() === "ONLINE" ? 0 : 1;
         const bOnline = (b.status || "").toUpperCase() === "ONLINE" ? 0 : 1;
         if (aOnline !== bOnline) return aOnline - bOnline;
-        return (a.srvPort ?? 0) - (b.srvPort ?? 0);
+        return (a.consumerId ?? 0) - (b.consumerId ?? 0);
       });
       setInstances(allItems);
     } catch (e) {
@@ -269,16 +258,10 @@ export default function Dashboard() {
     } finally {
       setInstancesLoading(false);
     }
-  }, [onlyOnline, committedWid, committedConsumer, committedPort]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onlyOnline, committedWid, committedConsumer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    fetch("/api/instances")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.defaultPort) setDefaultPort(d.defaultPort);
-      })
-      .catch(() => {})
-      .finally(() => loadInstances());
+    loadInstances();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -288,14 +271,12 @@ export default function Dashboard() {
   function commitSearch() {
     setCommittedWid(searchWid);
     setCommittedConsumer(searchConsumer);
-    setCommittedPort(searchPort);
   }
 
   function handleSearchKeyDown(e) {
     if (e.key === "Enter") commitSearch();
   }
 
-  const effectivePort = port.trim();
   const effectiveWid = wid.trim();
 
   const filteredInstances = instances.filter((it) => matchesFilter(it, instanceFilter));
@@ -303,8 +284,6 @@ export default function Dashboard() {
   function clearSelection() {
     setSelectedInstance(null);
     setSelectedKey("");
-    setHostInst("");
-    setPort(defaultPort ? String(defaultPort) : "");
     setWid("");
     setConsumer("");
     setQueueNames("");
@@ -319,8 +298,6 @@ export default function Dashboard() {
     if (!item) return;
     setSelectedInstance(item);
     setSelectedKey(value);
-    setHostInst(item.srvHost || "");
-    setPort(String(item.srvPort));
     setWid(item.wid != null ? String(item.wid) : "");
     setConsumer(item.consumerId != null ? String(item.consumerId) : "");
     setQueueNames(item.queueName ?? `consumer_${item.consumerId}`);
@@ -337,9 +314,7 @@ export default function Dashboard() {
     const [ks, ke] = DATE_BASIS[dateBasis] || DATE_BASIS.created;
     if (dateStart) body[ks] = toISO(dateStart);
     if (dateEnd) body[ke] = toISO(dateEnd);
-    body._port = effectivePort;
     body._wid = effectiveWid || undefined;
-    body._host = hostInst || undefined;
     body._timeoutMs = timeoutMs();
   }
 
@@ -385,9 +360,7 @@ export default function Dashboard() {
     }
     if (searchPhone.trim() && body.phone == null) body.phone = searchPhone.trim();
     if (body.limit == null && Number(searchLimit) > 0) body.limit = Number(searchLimit);
-    body._port = effectivePort;
     body._wid = effectiveWid || undefined;
-    body._host = hostInst || undefined;
     body._timeoutMs = timeoutMs();
     return body;
   }
@@ -399,16 +372,8 @@ export default function Dashboard() {
   async function run() {
     setError("");
     setCancelled(false);
-    if (!selectedInstance && !effectivePort) {
-      setError("Selecione uma instância.");
-      return;
-    }
-    if (!effectivePort) {
-      setError("Informe a porta da instância.");
-      return;
-    }
     if (!effectiveWid) {
-      setError("Selecione a instância (WID) para autenticar.");
+      setError("Selecione uma instância (WID) para autenticar.");
       return;
     }
     const ctrl = newController();
@@ -422,9 +387,7 @@ export default function Dashboard() {
           await postJSON("/api/gateway/history", {
             id: historyId.trim(),
             size: Number(historySize) > 0 ? Number(historySize) : 50,
-            _port: effectivePort,
             _wid: effectiveWid || undefined,
-            _host: hostInst || undefined,
             _timeoutMs: timeoutMs(),
           }, ctrl.signal)
         );
@@ -501,7 +464,6 @@ export default function Dashboard() {
       <div className="container">
         {/* ── Instancebar ── */}
         <div className="instancebar">
-          {/* Server-side search: WID, Consumer, Port */}
           <div className="field mono">
             <label htmlFor="sw-wid">WID</label>
             <input
@@ -523,19 +485,7 @@ export default function Dashboard() {
               inputMode="numeric"
             />
           </div>
-          <div className="field mono">
-            <label htmlFor="sw-port">Porta</label>
-            <input
-              id="sw-port"
-              value={searchPort}
-              onChange={(e) => setSearchPort(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="ex.: 10005"
-              inputMode="numeric"
-            />
-          </div>
 
-          {/* Online checkbox + local text filter stacked */}
           <div className="field">
             <label
               htmlFor="only-online"
@@ -558,7 +508,6 @@ export default function Dashboard() {
             />
           </div>
 
-          {/* Instance select */}
           <div className="field" style={{ flex: 2 }}>
             <label htmlFor="inst-select">
               Instância
@@ -574,7 +523,7 @@ export default function Dashboard() {
               onChange={(e) => handleSelectInstance(e.target.value)}
               disabled={instancesLoading}
             >
-              <option value="">— informar manualmente —</option>
+              <option value="">— selecione uma instância —</option>
               {filteredInstances.map((item) => {
                 const key = instanceKey(item);
                 return (
@@ -591,7 +540,6 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Action buttons */}
           <div className="field" style={{ justifyContent: "flex-end" }}>
             <label style={{ visibility: "hidden", fontSize: 11 }}>.</label>
             <div style={{ display: "flex", gap: 6 }}>
@@ -635,8 +583,7 @@ export default function Dashboard() {
               Instância ativa
             </span>
             <span style={{ color: "var(--muted)", fontFamily: "var(--mono)", fontSize: 12.5 }}>
-              :{selectedInstance.srvPort}
-              {" · "}{selectedInstance.name || selectedInstance.from || "—"}
+              {selectedInstance.name || selectedInstance.from || "—"}
               {" · cons "}{selectedInstance.consumerId ?? "—"}
               {selectedInstance.wid ? ` · wid ${selectedInstance.wid}` : ""}
               {selectedInstance.status ? ` · ${selectedInstance.status}` : ""}
@@ -668,11 +615,10 @@ export default function Dashboard() {
 
         {showQueryBar && (
           <div className="querybar">
-            {/* Readonly fields derived from selected instance */}
             <div className="field mono">
-              <label htmlFor="wid">WhatsApp ID (wid)</label>
+              <label htmlFor="qb-wid">WhatsApp ID (wid)</label>
               <input
-                id="wid"
+                id="qb-wid"
                 value={wid}
                 readOnly
                 placeholder="— selecione uma instância —"
@@ -680,9 +626,9 @@ export default function Dashboard() {
               />
             </div>
             <div className="field mono">
-              <label htmlFor="consumer">Consumer ID</label>
+              <label htmlFor="qb-consumer">Consumer ID</label>
               <input
-                id="consumer"
+                id="qb-consumer"
                 value={consumer}
                 readOnly
                 placeholder="— selecione uma instância —"
@@ -690,27 +636,16 @@ export default function Dashboard() {
               />
             </div>
             <div className="field mono">
-              <label htmlFor="queue">Queue name</label>
+              <label htmlFor="qb-queue">Queue name</label>
               <input
-                id="queue"
+                id="qb-queue"
                 value={queueNames}
                 readOnly
                 placeholder="— selecione uma instância —"
                 style={READONLY_STYLE}
               />
             </div>
-            <div className="field mono">
-              <label htmlFor="gw-port">Porta</label>
-              <input
-                id="gw-port"
-                value={port}
-                readOnly
-                placeholder="— selecione uma instância —"
-                style={READONLY_STYLE}
-              />
-            </div>
 
-            {/* Editable filters */}
             <div className="field">
               <label htmlFor="kind">Tipo</label>
               <select id="kind" value={messageKind} onChange={(e) => setMessageKind(e.target.value)}>
@@ -831,7 +766,7 @@ export default function Dashboard() {
                   Cancelar
                 </button>
               ) : (
-                <button className="btn" onClick={run} disabled={loading}>
+                <button className="btn" onClick={run}>
                   {actionLabel}
                 </button>
               )}
@@ -866,7 +801,7 @@ export default function Dashboard() {
         <div style={{ marginTop: 18 }}>
           {error && <div className="error-box">{error}</div>}
           {cancelled && !error && (
-            <div className="note" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted)" }}>
+            <div className="note" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted)", borderRadius: "var(--radius)", padding: "16px 18px", fontSize: 13.5 }}>
               Requisição cancelada.
             </div>
           )}
@@ -907,7 +842,6 @@ export default function Dashboard() {
 
           {tab === "cancel" && (
             <CancelPanel
-              port={effectivePort}
               wid={effectiveWid}
               consumer={consumer}
               queueNames={queueNames}

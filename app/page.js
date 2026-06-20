@@ -174,10 +174,9 @@ export default function Dashboard() {
   const [historyId, setHistoryId] = useState("");
   const [historySize, setHistorySize] = useState("50");
 
-  // Search tab
+  // Search tab (uses /queued-ledger/stats with phone/idSms filter)
   const [searchPhone, setSearchPhone] = useState("");
-  const [searchLimit, setSearchLimit] = useState("50");
-  const [searchJSON, setSearchJSON] = useState("");
+  const [searchIdSms, setSearchIdSms] = useState("");
 
   const [tab, setTab] = useState("stats");
   const [statsData, setStatsData] = useState(null);
@@ -346,25 +345,18 @@ export default function Dashboard() {
   }
 
   function buildSearchBody() {
-    let body = {};
-    if (searchJSON.trim()) {
-      try {
-        body = JSON.parse(searchJSON);
-      } catch {
-        throw new Error("JSON avançado de busca inválido.");
-      }
-    }
-    if (body.consumerId == null && body.consumerIds == null) {
-      const ids = parseConsumerIds(consumer);
-      if (ids.length) body.consumerId = ids[0];
-    }
-    if (body.queueName == null && body.queueNames == null && queueNames.trim()) {
-      body.queueName = queueNames.trim().split(",")[0].trim();
-    }
-    if (searchPhone.trim() && body.phone == null) body.phone = searchPhone.trim();
-    if (body.limit == null && Number(searchLimit) > 0) body.limit = Number(searchLimit);
-    body._wid = effectiveWid || undefined;
-    body._timeoutMs = timeoutMs();
+    const body = {
+      includeDetails: true,
+      includePendingDetails: true,
+      includeErrorDetails: true,
+      includeSamples: true,
+      pageNumber: 1,
+      pageSize: 50,
+    };
+    applyShared(body);
+    if (searchPhone.trim()) body.phone = searchPhone.trim();
+    const idSmsNum = Number(searchIdSms.trim());
+    if (idSmsNum > 0) body.idSms = idSmsNum;
     return body;
   }
 
@@ -395,7 +387,7 @@ export default function Dashboard() {
           }, ctrl.signal)
         );
       } else if (tab === "search") {
-        setSearchData(await postJSON("/api/gateway/search", buildSearchBody(), ctrl.signal));
+        setSearchData(await postJSON("/api/gateway/stats", buildSearchBody(), ctrl.signal));
       }
     } catch (e) {
       if (isAbortError(e)) {
@@ -785,12 +777,12 @@ export default function Dashboard() {
                   <input id="sph" value={searchPhone} onChange={(e) => setSearchPhone(e.target.value)} placeholder="5511999999999" />
                 </div>
                 <div className="field mono">
-                  <label htmlFor="slm">Limite</label>
-                  <input id="slm" value={searchLimit} onChange={(e) => setSearchLimit(e.target.value)} inputMode="numeric" />
+                  <label htmlFor="sidsms">ID SMS</label>
+                  <input id="sidsms" value={searchIdSms} onChange={(e) => setSearchIdSms(e.target.value)} placeholder="117994005" inputMode="numeric" />
                 </div>
                 <div className="field" style={{ gridColumn: "1 / -1" }}>
                   <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", fontStyle: "italic" }}>
-                    Esta aba usa <code style={{ fontStyle: "normal" }}>/messages/search</code> para buscar mensagens já enviadas/recebidas no histórico de conversas. Para localizar mensagens <strong>queued</strong> (pendentes, ainda não enviadas), use a aba <strong>Relatório de envios</strong> com o campo <strong>Telefone</strong>.
+                    Busca via <code style={{ fontStyle: "normal" }}>/queued-ledger/stats</code> filtrando por telefone e/ou ID SMS. Mostra pendentes, falhas e amostras. Selecione a instância antes de buscar.
                   </p>
                 </div>
               </>
@@ -811,28 +803,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {tab === "search" && (
-          <details className="raw" style={{ marginTop: 14 }}>
-            <summary>Busca avançada (JSON do corpo)</summary>
-            <textarea
-              value={searchJSON}
-              onChange={(e) => setSearchJSON(e.target.value)}
-              placeholder='{ "phone": "5511999999999", "limit": 50 }'
-              style={{
-                width: "100%",
-                minHeight: 120,
-                marginTop: 12,
-                background: "var(--surface)",
-                color: "var(--text)",
-                border: "1px solid var(--border)",
-                borderRadius: "7px",
-                padding: 12,
-                fontFamily: "var(--mono)",
-                fontSize: 12.5,
-              }}
-            />
-          </details>
-        )}
 
         <div style={{ marginTop: 18 }}>
           {error && <div className="error-box">{error}</div>}
@@ -869,10 +839,10 @@ export default function Dashboard() {
 
           {!loading && tab === "search" &&
             (searchData ? (
-              <ResultView data={searchData} />
+              <StatsReport data={searchData} />
             ) : (
               !cancelled && <div className="empty">
-                Defina os filtros de busca e clique em "Buscar mensagens".
+                Informe o telefone ou ID SMS e clique em "Buscar mensagens".
               </div>
             ))}
 

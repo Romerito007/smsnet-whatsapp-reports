@@ -8,7 +8,7 @@ function parseIds(str) {
   return (str || "")
     .split(",")
     .map((s) => Number(s.trim()))
-    .filter((n) => !isNaN(n) && n > 0);
+    .filter((n) => Number.isInteger(n) && n > 0);
 }
 function splitCsv(str) {
   return (str || "")
@@ -32,9 +32,9 @@ async function postCancel(body) {
   return data;
 }
 
-export default function CancelPanel({ port, wid, consumer }) {
+export default function CancelPanel({ port, wid, consumer, queueNames: initialQueueNames }) {
   const [consumerIds, setConsumerIds] = useState(consumer || "");
-  const [queueNames, setQueueNames] = useState("");
+  const [queueNames, setQueueNames] = useState(initialQueueNames || "");
   const [messageKind, setMessageKind] = useState("billing");
   const [stQueued, setStQueued] = useState(true);
   const [stRetryable, setStRetryable] = useState(true);

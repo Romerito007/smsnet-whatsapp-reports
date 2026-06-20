@@ -80,6 +80,12 @@ function matchesFilter(item, filter) {
   ].some((v) => v && v.toLowerCase().includes(q));
 }
 
+function parseConsumerIds(str) {
+  return String(str || "").split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
 function ResultView({ data }) {
   if (!data) return null;
   if (data.error) return <div className="error-box">{fmt(data.error)}</div>;
@@ -110,11 +116,14 @@ function ResultView({ data }) {
   );
 }
 
+const READONLY_STYLE = { color: "var(--muted)", background: "var(--surface-2)", cursor: "default" };
+
 export default function Dashboard() {
   const router = useRouter();
 
+  // Gateway host info
   const [host, setHost] = useState("");
-  const [port, setPort] = useState("");
+  const [defaultPort, setDefaultPort] = useState("");
 
   // Instance selector
   const [instances, setInstances] = useState([]);
@@ -125,14 +134,21 @@ export default function Dashboard() {
   const [selectedKey, setSelectedKey] = useState("");
   const [selectedInstance, setSelectedInstance] = useState(null);
 
-  // Server-side search inputs (fire only on button/Enter)
+  // Server-side search inputs (committed on button/Enter)
   const [searchWid, setSearchWid] = useState("");
   const [searchConsumer, setSearchConsumer] = useState("");
+  const [searchPort, setSearchPort] = useState("");
+  const [committedWid, setCommittedWid] = useState("");
+  const [committedConsumer, setCommittedConsumer] = useState("");
+  const [committedPort, setCommittedPort] = useState("");
 
-  // Filtros compartilhados
+  // Derived from selected instance (readonly in querybar)
+  const [port, setPort] = useState("");
   const [wid, setWid] = useState("");
   const [consumer, setConsumer] = useState("");
   const [queueNames, setQueueNames] = useState("");
+
+  // Shared filters (editable)
   const [messageKind, setMessageKind] = useState("");
   const [dateBasis, setDateBasis] = useState("created");
   const [dateStart, setDateStart] = useState("");
@@ -140,17 +156,17 @@ export default function Dashboard() {
   const [recentMinutes, setRecentMinutes] = useState("10");
   const [pageSize, setPageSize] = useState("100");
 
-  // Avançado (stats)
+  // Stats advanced
   const [errorClass, setErrorClass] = useState("");
   const [errorContains, setErrorContains] = useState("");
   const [previewType, setPreviewType] = useState("");
   const [phone, setPhone] = useState("");
 
-  // Histórico
+  // History
   const [historyId, setHistoryId] = useState("");
   const [historySize, setHistorySize] = useState("50");
 
-  // Busca
+  // Search tab
   const [searchPhone, setSearchPhone] = useState("");
   const [searchLimit, setSearchLimit] = useState("50");
   const [searchJSON, setSearchJSON] = useState("");
@@ -163,24 +179,23 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // searchWid/searchConsumer refs for use inside loadInstances without dep churn
-  const [committedWid, setCommittedWid] = useState("");
-  const [committedConsumer, setCommittedConsumer] = useState("");
-
   const loadInstances = useCallback(async () => {
     setInstancesLoading(true);
     setInstancesError("");
     try {
       const allItems = [];
       let pageNumber = 1;
-      const PAGE_SIZE = 200;
       for (let i = 0; i < 25; i++) {
-        const body = { pageNumber, pageSize: PAGE_SIZE };
+        const body = { pageNumber, pageSize: 200 };
         if (onlyOnline) body.status = "ONLINE";
         if (committedWid.trim()) body.wids = [committedWid.trim()];
         if (committedConsumer.trim()) {
           const n = Number(committedConsumer.trim());
           if (!isNaN(n)) body.consumerIds = [n];
+        }
+        if (committedPort.trim()) {
+          const n = Number(committedPort.trim());
+          if (!isNaN(n)) body.srvPorts = [n];
         }
         const resp = await postJSON("/api/gateway/instances", body);
         const items = Array.isArray(resp.items)
@@ -202,25 +217,21 @@ export default function Dashboard() {
       });
       setInstances(allItems);
     } catch (e) {
-      if (e.message !== "Sessão expirada.") {
-        setInstancesError(e.message);
-      }
+      if (e.message !== "Sessão expirada.") setInstancesError(e.message);
     } finally {
       setInstancesLoading(false);
     }
-  }, [onlyOnline, committedWid, committedConsumer]);
+  }, [onlyOnline, committedWid, committedConsumer, committedPort]);
 
   useEffect(() => {
     fetch("/api/instances")
       .then((r) => r.json())
       .then((d) => {
         if (d.host) setHost(d.host);
-        if (d.defaultPort) setPort(d.defaultPort);
+        if (d.defaultPort) setDefaultPort(d.defaultPort);
       })
       .catch(() => {})
-      .finally(() => {
-        loadInstances();
-      });
+      .finally(() => loadInstances());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -230,6 +241,7 @@ export default function Dashboard() {
   function commitSearch() {
     setCommittedWid(searchWid);
     setCommittedConsumer(searchConsumer);
+    setCommittedPort(searchPort);
   }
 
   function handleSearchKeyDown(e) {
@@ -237,67 +249,48 @@ export default function Dashboard() {
   }
 
   const effectivePort = port.trim();
+  const effectiveWid = wid.trim();
 
-  const filteredInstances = instances.filter((it) =>
-    matchesFilter(it, instanceFilter)
-  );
+  const filteredInstances = instances.filter((it) => matchesFilter(it, instanceFilter));
 
   function clearSelection() {
-    setSelectedKey("");
     setSelectedInstance(null);
+    setSelectedKey("");
+    setPort(defaultPort ? String(defaultPort) : "");
+    setWid("");
+    setConsumer("");
+    setQueueNames("");
   }
 
   function handleSelectInstance(value) {
-    setSelectedKey(value);
     if (!value) {
-      setSelectedInstance(null);
+      clearSelection();
       return;
     }
     const item = instances.find((it) => instanceKey(it) === value);
     if (!item) return;
     setSelectedInstance(item);
+    setSelectedKey(value);
     setPort(String(item.srvPort));
-    if (item.consumerId != null) setConsumer(String(item.consumerId));
-    if (item.wid) setWid(String(item.wid));
-    if (item.queueName) setQueueNames(item.queueName);
-  }
-
-  function handlePortChange(v) {
-    setPort(v);
-    clearSelection();
-  }
-
-  function handleConsumerChange(v) {
-    setConsumer(v);
-    clearSelection();
-  }
-
-  function handleWidChange(v) {
-    setWid(v);
-    clearSelection();
+    setWid(item.wid != null ? String(item.wid) : "");
+    setConsumer(item.consumerId != null ? String(item.consumerId) : "");
+    setQueueNames(item.queueName ?? `consumer_${item.consumerId}`);
   }
 
   function applyShared(body) {
-    if (wid.trim()) body.wids = [wid.trim()];
-    if (consumer.trim()) {
-      const ids = consumer
-        .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => !isNaN(n));
-      if (ids.length) body.consumerIds = ids;
-    }
+    const w = effectiveWid;
+    if (w) body.wids = [w];
+    const ids = parseConsumerIds(consumer);
+    if (ids.length) body.consumerIds = ids;
     if (queueNames.trim()) {
-      body.queueNames = queueNames
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      body.queueNames = queueNames.split(",").map((s) => s.trim()).filter(Boolean);
     }
     if (messageKind) body.messageKind = messageKind;
     const [ks, ke] = DATE_BASIS[dateBasis] || DATE_BASIS.created;
     if (dateStart) body[ks] = toISO(dateStart);
     if (dateEnd) body[ke] = toISO(dateEnd);
     body._port = effectivePort;
-    body._wid = selectedInstance?.wid || wid.trim() || undefined;
+    body._wid = effectiveWid || undefined;
   }
 
   function buildStatsBody() {
@@ -333,23 +326,22 @@ export default function Dashboard() {
         throw new Error("JSON avançado de busca inválido.");
       }
     }
-    if (wid.trim() && body.wid == null && body.wids == null) body.wid = wid.trim();
-    if (consumer.trim() && body.consumerId == null && body.consumerIds == null) {
-      const id = Number(consumer.split(",")[0].trim());
-      if (!isNaN(id)) body.consumerId = id;
+    const w = effectiveWid;
+    if (w && body.wid == null && body.wids == null) body.wid = w;
+    if (body.consumerId == null && body.consumerIds == null) {
+      const ids = parseConsumerIds(consumer);
+      if (ids.length) body.consumerId = ids[0];
     }
     if (searchPhone.trim() && body.phone == null) body.phone = searchPhone.trim();
     if (body.limit == null && Number(searchLimit) > 0) body.limit = Number(searchLimit);
     body._port = effectivePort;
-    body._wid = selectedInstance?.wid || wid.trim() || undefined;
+    body._wid = w || undefined;
     return body;
   }
 
-  const effectiveWid = selectedInstance?.wid || wid.trim();
-
   async function run() {
     setError("");
-    if (!effectiveWid && !effectivePort) {
+    if (!selectedInstance && !effectivePort) {
       setError("Selecione uma instância.");
       return;
     }
@@ -359,10 +351,6 @@ export default function Dashboard() {
     }
     if (!effectiveWid) {
       setError("Selecione a instância (WID) para autenticar.");
-      return;
-    }
-    if (tab === "stats" && !consumer.trim()) {
-      setError("Informe o consumer.");
       return;
     }
     setLoading(true);
@@ -376,7 +364,7 @@ export default function Dashboard() {
             id: historyId.trim(),
             size: Number(historySize) > 0 ? Number(historySize) : 50,
             _port: effectivePort,
-            _wid: selectedInstance?.wid || wid.trim() || undefined,
+            _wid: effectiveWid || undefined,
           })
         );
       } else if (tab === "search") {
@@ -422,14 +410,15 @@ export default function Dashboard() {
       <div className="container">
         {/* ── Instancebar ── */}
         <div className="instancebar">
+          {/* Host (readonly) */}
           <div className="field">
             <label htmlFor="gw-host">Host do gateway</label>
             <input id="gw-host" value={host} readOnly placeholder="carregando…" />
           </div>
 
-          {/* Server-side search */}
+          {/* Server-side search: WID, Consumer, Port */}
           <div className="field mono">
-            <label htmlFor="sw-wid">Buscar por WID</label>
+            <label htmlFor="sw-wid">WID</label>
             <input
               id="sw-wid"
               value={searchWid}
@@ -439,7 +428,7 @@ export default function Dashboard() {
             />
           </div>
           <div className="field mono">
-            <label htmlFor="sw-cons">Buscar por Consumer</label>
+            <label htmlFor="sw-cons">Consumer</label>
             <input
               id="sw-cons"
               value={searchConsumer}
@@ -449,19 +438,23 @@ export default function Dashboard() {
               inputMode="numeric"
             />
           </div>
+          <div className="field mono">
+            <label htmlFor="sw-port">Porta</label>
+            <input
+              id="sw-port"
+              value={searchPort}
+              onChange={(e) => setSearchPort(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="ex.: 10005"
+              inputMode="numeric"
+            />
+          </div>
 
-          {/* Online filter + local text filter stacked */}
+          {/* Online checkbox + local text filter stacked */}
           <div className="field">
             <label
               htmlFor="only-online"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                textTransform: "none",
-                letterSpacing: 0,
-                fontSize: 12,
-              }}
+              style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", letterSpacing: 0, fontSize: 12 }}
             >
               <input
                 id="only-online"
@@ -496,7 +489,7 @@ export default function Dashboard() {
               onChange={(e) => handleSelectInstance(e.target.value)}
               disabled={instancesLoading}
             >
-              <option value="">— informar porta manualmente —</option>
+              <option value="">— informar manualmente —</option>
               {filteredInstances.map((item) => {
                 const key = instanceKey(item);
                 return (
@@ -513,18 +506,6 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Port (always editable) */}
-          <div className="field mono" style={{ minWidth: 110 }}>
-            <label htmlFor="gw-port">Porta *</label>
-            <input
-              id="gw-port"
-              value={port}
-              onChange={(e) => handlePortChange(e.target.value)}
-              placeholder="ex.: 10005"
-              inputMode="numeric"
-            />
-          </div>
-
           {/* Action buttons */}
           <div className="field" style={{ justifyContent: "flex-end" }}>
             <label style={{ visibility: "hidden", fontSize: 11 }}>.</label>
@@ -535,7 +516,7 @@ export default function Dashboard() {
                 disabled={instancesLoading}
                 style={{ whiteSpace: "nowrap" }}
               >
-                {instancesLoading ? "Buscando…" : "Buscar instâncias"}
+                {instancesLoading ? "Buscando…" : "Buscar"}
               </button>
               <button
                 className="btn-ghost"
@@ -602,33 +583,49 @@ export default function Dashboard() {
 
         {showQueryBar && (
           <div className="querybar">
+            {/* Readonly fields derived from selected instance */}
             <div className="field mono">
               <label htmlFor="wid">WhatsApp ID (wid)</label>
               <input
                 id="wid"
                 value={wid}
-                onChange={(e) => handleWidChange(e.target.value)}
-                placeholder="ex.: 12887"
+                readOnly
+                placeholder="— selecione uma instância —"
+                style={READONLY_STYLE}
               />
             </div>
             <div className="field mono">
-              <label htmlFor="consumer">Consumer ID(s)</label>
+              <label htmlFor="consumer">Consumer ID</label>
               <input
                 id="consumer"
                 value={consumer}
-                onChange={(e) => handleConsumerChange(e.target.value)}
-                placeholder="ex.: 2202, 1356"
+                readOnly
+                placeholder="— selecione uma instância —"
+                style={READONLY_STYLE}
               />
             </div>
             <div className="field mono">
-              <label htmlFor="queue">Queue name(s)</label>
+              <label htmlFor="queue">Queue name</label>
               <input
                 id="queue"
                 value={queueNames}
-                onChange={(e) => setQueueNames(e.target.value)}
-                placeholder="ex.: consumer_2202"
+                readOnly
+                placeholder="— selecione uma instância —"
+                style={READONLY_STYLE}
               />
             </div>
+            <div className="field mono">
+              <label htmlFor="gw-port">Porta</label>
+              <input
+                id="gw-port"
+                value={port}
+                readOnly
+                placeholder="— selecione uma instância —"
+                style={READONLY_STYLE}
+              />
+            </div>
+
+            {/* Editable filters */}
             <div className="field">
               <label htmlFor="kind">Tipo</label>
               <select id="kind" value={messageKind} onChange={(e) => setMessageKind(e.target.value)}>
@@ -766,7 +763,7 @@ export default function Dashboard() {
               <StatsReport data={statsData} />
             ) : (
               <div className="empty">
-                Selecione uma instância ou informe a porta e consumer, depois clique em "Sincronizar relatório".
+                Selecione uma instância e clique em "Sincronizar relatório".
               </div>
             ))}
 
@@ -789,7 +786,12 @@ export default function Dashboard() {
             ))}
 
           {tab === "cancel" && (
-            <CancelPanel port={effectivePort} wid={effectiveWid} consumer={consumer} />
+            <CancelPanel
+              port={effectivePort}
+              wid={effectiveWid}
+              consumer={consumer}
+              queueNames={queueNames}
+            />
           )}
         </div>
       </div>

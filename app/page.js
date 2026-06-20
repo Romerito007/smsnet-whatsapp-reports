@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import StatsReport from "@/components/StatsReport";
 import CancelPanel from "@/components/CancelPanel";
@@ -31,11 +31,16 @@ function toISO(local) {
   return isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
-async function postJSON(url, body) {
+function isAbortError(e) {
+  return e?.name === "AbortError" || e?.message?.includes("aborted");
+}
+
+async function postJSON(url, body, signal) {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (res.status === 401) {
     window.location.href = "/login";
@@ -118,9 +123,13 @@ function ResultView({ data }) {
 }
 
 const READONLY_STYLE = { color: "var(--muted)", background: "var(--surface-2)", cursor: "default" };
+const TIMEOUT_MIN = 5;
+const TIMEOUT_MAX = 300;
+const TIMEOUT_DEFAULT = 60;
 
 export default function Dashboard() {
   const router = useRouter();
+  const controllerRef = useRef(null);
 
   const [defaultPort, setDefaultPort] = useState("");
 
@@ -147,6 +156,9 @@ export default function Dashboard() {
   const [wid, setWid] = useState("");
   const [consumer, setConsumer] = useState("");
   const [queueNames, setQueueNames] = useState("");
+
+  // Timeout
+  const [timeoutSec, setTimeoutSec] = useState(TIMEOUT_DEFAULT);
 
   // Shared filters (editable)
   const [messageKind, setMessageKind] = useState("");
@@ -179,15 +191,50 @@ export default function Dashboard() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [cancelled, setCancelled] = useState(false);
+
+  // Load persisted timeout
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("timeoutSec");
+      if (saved) {
+        const n = Number(saved);
+        if (n >= TIMEOUT_MIN && n <= TIMEOUT_MAX) setTimeoutSec(n);
+      }
+    } catch {}
+  }, []);
+
+  function saveTimeout(val) {
+    const n = Math.max(TIMEOUT_MIN, Math.min(TIMEOUT_MAX, Number(val) || TIMEOUT_DEFAULT));
+    setTimeoutSec(n);
+    try { localStorage.setItem("timeoutSec", String(n)); } catch {}
+    return n;
+  }
+
+  function timeoutMs() {
+    return timeoutSec * 1000;
+  }
+
+  function abortCurrent() {
+    controllerRef.current?.abort();
+  }
+
+  function newController() {
+    abortCurrent();
+    const ctrl = new AbortController();
+    controllerRef.current = ctrl;
+    return ctrl;
+  }
 
   const loadInstances = useCallback(async () => {
     setInstancesLoading(true);
     setInstancesError("");
+    const ctrl = new AbortController();
     try {
       const allItems = [];
       let pageNumber = 1;
       for (let i = 0; i < 25; i++) {
-        const body = { pageNumber, pageSize: 200 };
+        const body = { pageNumber, pageSize: 200, _timeoutMs: timeoutMs() };
         if (onlyOnline) body.status = "ONLINE";
         if (committedWid.trim()) body.wids = [committedWid.trim()];
         if (committedConsumer.trim()) {
@@ -198,7 +245,7 @@ export default function Dashboard() {
           const n = Number(committedPort.trim());
           if (!isNaN(n)) body.srvPorts = [n];
         }
-        const resp = await postJSON("/api/gateway/instances", body);
+        const resp = await postJSON("/api/gateway/instances", body, ctrl.signal);
         const items = Array.isArray(resp.items)
           ? resp.items
           : Array.isArray(resp.data)
@@ -218,11 +265,11 @@ export default function Dashboard() {
       });
       setInstances(allItems);
     } catch (e) {
-      if (e.message !== "Sessão expirada.") setInstancesError(e.message);
+      if (!isAbortError(e) && e.message !== "Sessão expirada.") setInstancesError(e.message);
     } finally {
       setInstancesLoading(false);
     }
-  }, [onlyOnline, committedWid, committedConsumer, committedPort]);
+  }, [onlyOnline, committedWid, committedConsumer, committedPort]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetch("/api/instances")
@@ -293,6 +340,7 @@ export default function Dashboard() {
     body._port = effectivePort;
     body._wid = effectiveWid || undefined;
     body._host = hostInst || undefined;
+    body._timeoutMs = timeoutMs();
   }
 
   function buildStatsBody() {
@@ -340,11 +388,17 @@ export default function Dashboard() {
     body._port = effectivePort;
     body._wid = effectiveWid || undefined;
     body._host = hostInst || undefined;
+    body._timeoutMs = timeoutMs();
     return body;
+  }
+
+  function cancelRequest() {
+    abortCurrent();
   }
 
   async function run() {
     setError("");
+    setCancelled(false);
     if (!selectedInstance && !effectivePort) {
       setError("Selecione uma instância.");
       return;
@@ -357,10 +411,11 @@ export default function Dashboard() {
       setError("Selecione a instância (WID) para autenticar.");
       return;
     }
+    const ctrl = newController();
     setLoading(true);
     try {
       if (tab === "stats") {
-        setStatsData(await postJSON("/api/gateway/stats", buildStatsBody()));
+        setStatsData(await postJSON("/api/gateway/stats", buildStatsBody(), ctrl.signal));
       } else if (tab === "history") {
         if (!historyId.trim()) throw new Error("Informe o ID da conversa / remotejid.");
         setHistoryData(
@@ -370,13 +425,18 @@ export default function Dashboard() {
             _port: effectivePort,
             _wid: effectiveWid || undefined,
             _host: hostInst || undefined,
-          })
+            _timeoutMs: timeoutMs(),
+          }, ctrl.signal)
         );
       } else if (tab === "search") {
-        setSearchData(await postJSON("/api/gateway/search", buildSearchBody()));
+        setSearchData(await postJSON("/api/gateway/search", buildSearchBody(), ctrl.signal));
       }
     } catch (e) {
-      setError(e.message);
+      if (isAbortError(e)) {
+        setCancelled(true);
+      } else {
+        setError(e.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -408,6 +468,29 @@ export default function Dashboard() {
           </span>
         </div>
         <div className="topbar-actions">
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <label htmlFor="timeout-sec" style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>
+              Timeout (s)
+            </label>
+            <input
+              id="timeout-sec"
+              type="number"
+              min={TIMEOUT_MIN}
+              max={TIMEOUT_MAX}
+              value={timeoutSec}
+              onChange={(e) => saveTimeout(e.target.value)}
+              style={{
+                width: 62,
+                background: "var(--surface-3)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text)",
+                padding: "5px 8px",
+                fontSize: 13,
+                fontFamily: "var(--mono)",
+              }}
+            />
+          </div>
           <ThemeToggle />
           <button className="btn-ghost" onClick={logout}>
             Sair
@@ -743,9 +826,15 @@ export default function Dashboard() {
             )}
 
             <div className="actions">
-              <button className="btn" onClick={run} disabled={loading}>
-                {loading ? "Carregando…" : actionLabel}
-              </button>
+              {loading ? (
+                <button className="btn-ghost" onClick={cancelRequest} style={{ borderColor: "var(--crit)", color: "var(--crit)" }}>
+                  Cancelar
+                </button>
+              ) : (
+                <button className="btn" onClick={run} disabled={loading}>
+                  {actionLabel}
+                </button>
+              )}
               <span className="spacer" />
             </div>
           </div>
@@ -776,6 +865,11 @@ export default function Dashboard() {
 
         <div style={{ marginTop: 18 }}>
           {error && <div className="error-box">{error}</div>}
+          {cancelled && !error && (
+            <div className="note" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted)" }}>
+              Requisição cancelada.
+            </div>
+          )}
 
           {loading && tab !== "cancel" && (
             <div className="loading">
@@ -788,7 +882,7 @@ export default function Dashboard() {
             (statsData ? (
               <StatsReport data={statsData} />
             ) : (
-              <div className="empty">
+              !cancelled && <div className="empty">
                 Selecione uma instância e clique em "Sincronizar relatório".
               </div>
             ))}
@@ -797,7 +891,7 @@ export default function Dashboard() {
             (historyData ? (
               <ResultView data={historyData} />
             ) : (
-              <div className="empty">
+              !cancelled && <div className="empty">
                 Informe o ID da conversa e clique em "Buscar histórico".
               </div>
             ))}
@@ -806,7 +900,7 @@ export default function Dashboard() {
             (searchData ? (
               <ResultView data={searchData} />
             ) : (
-              <div className="empty">
+              !cancelled && <div className="empty">
                 Defina os filtros de busca e clique em "Buscar mensagens".
               </div>
             ))}
@@ -817,6 +911,7 @@ export default function Dashboard() {
               wid={effectiveWid}
               consumer={consumer}
               queueNames={queueNames}
+              timeoutSec={timeoutSec}
             />
           )}
         </div>

@@ -4,11 +4,13 @@ import { gatewayFetch } from "@/lib/gateway";
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const port = body._port;
+  const timeoutMs = body._timeoutMs;
   const wid = body._wid;
   const host = body._host;
   delete body._port;
   delete body._wid;
   delete body._host;
+  delete body._timeoutMs;
 
   if (!wid) {
     return NextResponse.json(
@@ -37,7 +39,7 @@ export async function POST(request) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       },
-      { wid, port, host }
+      { wid, port, host, timeoutMs }
     );
     return NextResponse.json(data ?? { error: "Resposta vazia do gateway." }, {
       status: ok ? 200 : status,

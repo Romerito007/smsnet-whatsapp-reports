@@ -51,16 +51,6 @@ async function postJSON(url, body, signal) {
   return data;
 }
 
-function findArray(obj) {
-  if (Array.isArray(obj)) return obj;
-  if (obj && typeof obj === "object") {
-    for (const k of ["messages", "data", "items", "results", "history", "rows"]) {
-      if (Array.isArray(obj[k])) return obj[k];
-    }
-  }
-  return null;
-}
-
 function instanceKey(item) {
   return `${item.consumerId ?? ""}|${item.wid ?? ""}`;
 }
@@ -91,26 +81,29 @@ function parseConsumerIds(str) {
     .filter((n) => Number.isInteger(n) && n > 0);
 }
 
-function ResultView({ data }) {
+function SearchResultView({ data, onNextPage, searchPage }) {
   if (!data) return null;
-  if (data.error) return <div className="error-box">{fmt(data.error)}</div>;
-  const arr = findArray(data);
+  if (data.error) return <div className="error-box">{data.error}</div>;
+  const items = data.items || [];
+  const pag = data.pagination || {};
   return (
     <div>
-      {arr ? (
-        <div className="section">
-          <h3>
-            Mensagens <span className="count">{arr.length}</span>
-          </h3>
-          {arr.length ? (
-            <DataTable rows={arr} max={500} />
-          ) : (
-            <div className="empty">Nenhuma mensagem retornada.</div>
-          )}
-        </div>
-      ) : (
-        <div className="empty">
-          Resposta sem lista de mensagens reconhecível — veja o JSON abaixo.
+      <div className="section">
+        <h3>
+          Mensagens <span className="count">{items.length}</span>
+          {pag.total != null && <span style={{color:"var(--muted)", fontSize:12, marginLeft:8}}>de {pag.total}</span>}
+        </h3>
+        {items.length ? (
+          <DataTable rows={items} prefer={["direction","status","messageType","phone","remoteJid","bodyPreview","createdAt","sentAt"]} max={200} />
+        ) : (
+          <div className="empty">Nenhuma mensagem encontrada.</div>
+        )}
+      </div>
+      {pag.hasNext && (
+        <div style={{marginTop:12}}>
+          <button className="btn-ghost" onClick={() => onNextPage(searchPage + 1)}>
+            Próxima página ({searchPage + 1})
+          </button>
         </div>
       )}
       <details className="raw">
@@ -170,17 +163,17 @@ export default function Dashboard() {
   const [previewType, setPreviewType] = useState("");
   const [phone, setPhone] = useState("");
 
-  // History
-  const [historyId, setHistoryId] = useState("");
-  const [historySize, setHistorySize] = useState("50");
-
-  // Search tab (uses /queued-ledger/stats with phone/idSms filter)
+  // Search tab state
   const [searchPhone, setSearchPhone] = useState("");
   const [searchIdSms, setSearchIdSms] = useState("");
+  const [searchLimit, setSearchLimit] = useState("50");
+  const [searchIncludeTotal, setSearchIncludeTotal] = useState(false);
+  const [searchBody, setSearchBody] = useState(false);
+  const [searchJSON, setSearchJSON] = useState("");
+  const [searchPage, setSearchPage] = useState(1);
 
   const [tab, setTab] = useState("stats");
   const [statsData, setStatsData] = useState(null);
-  const [historyData, setHistoryData] = useState(null);
   const [searchData, setSearchData] = useState(null);
 
   const [loading, setLoading] = useState(false);
@@ -344,19 +337,54 @@ export default function Dashboard() {
     return body;
   }
 
-  function buildSearchBody() {
-    const body = {
-      includeDetails: true,
-      includePendingDetails: true,
-      includeErrorDetails: true,
-      includeSamples: true,
-      pageNumber: 1,
-      pageSize: 50,
-    };
-    applyShared(body);
+  function buildSearchBody(pageNumber = 1) {
+    if (searchJSON.trim()) {
+      try {
+        const parsed = JSON.parse(searchJSON.trim());
+        parsed._wid = effectiveWid || undefined;
+        parsed._timeoutMs = timeoutMs();
+        return parsed;
+      } catch {
+        throw new Error("JSON inválido no campo de busca avançada.");
+      }
+    }
+
+    const body = {};
+
+    const consumerNum = Number(consumer);
+    if (consumer && consumerNum > 0) body.consumerId = consumerNum;
+
+    if (queueNames.trim()) {
+      const firstQueue = queueNames.split(",")[0].trim();
+      if (firstQueue) body.queueName = firstQueue;
+    }
+
+    if (effectiveWid) body.wid = effectiveWid;
+
     if (searchPhone.trim()) body.phone = searchPhone.trim();
+
     const idSmsNum = Number(searchIdSms.trim());
-    if (idSmsNum > 0) body.idSms = idSmsNum;
+    if (searchIdSms.trim() && idSmsNum > 0) body.idSms = idSmsNum;
+
+    if (dateBasis === "created") {
+      if (dateStart) body.dateCreatedStart = toISO(dateStart);
+      if (dateEnd) body.dateCreatedEnd = toISO(dateEnd);
+    }
+
+    body.pageNumber = pageNumber;
+    body.limit = Math.min(Number(searchLimit) || 50, 100);
+    body.includeTotal = searchIncludeTotal;
+
+    if (searchBody) body.searchBody = true;
+
+    body._wid = effectiveWid || undefined;
+    body._timeoutMs = timeoutMs();
+
+    // Client-side validation
+    if (!body.phone && !body.consumerId && !body.queueName && !body.idSms && !body.searchBody) {
+      throw new Error("Informe telefone, consumer/fila, ID SMS ou texto.");
+    }
+
     return body;
   }
 
@@ -376,22 +404,17 @@ export default function Dashboard() {
     try {
       if (tab === "stats") {
         setStatsData(await postJSON("/api/gateway/stats", buildStatsBody(), ctrl.signal));
-      } else if (tab === "history") {
-        if (!historyId.trim()) throw new Error("Informe o ID da conversa / remotejid.");
-        setHistoryData(
-          await postJSON("/api/gateway/history", {
-            id: historyId.trim(),
-            size: Number(historySize) > 0 ? Number(historySize) : 50,
-            _wid: effectiveWid || undefined,
-            _timeoutMs: timeoutMs(),
-          }, ctrl.signal)
-        );
       } else if (tab === "search") {
-        setSearchData(await postJSON("/api/gateway/stats", buildSearchBody(), ctrl.signal));
+        setSearchPage(1);
+        setSearchData(await postJSON("/api/gateway/search", buildSearchBody(1), ctrl.signal));
       }
     } catch (e) {
       if (isAbortError(e)) {
         setCancelled(true);
+      } else if (e.message.includes("missing_search_filter")) {
+        setError("Filtro inválido: informe telefone, consumer/fila, ID SMS ou texto.");
+      } else if (e.message.includes("message_search_timeout")) {
+        setError("O gateway excedeu o timeout interno de busca (8s). Refine os filtros ou tente novamente.");
       } else {
         setError(e.message);
       }
@@ -409,8 +432,6 @@ export default function Dashboard() {
   const actionLabel =
     tab === "stats"
       ? "Sincronizar relatório"
-      : tab === "history"
-      ? "Buscar histórico"
       : "Buscar mensagens";
 
   const showQueryBar = tab !== "cancel";
@@ -597,9 +618,6 @@ export default function Dashboard() {
           <button className={`tab ${tab === "stats" ? "active" : ""}`} onClick={() => setTab("stats")}>
             Relatório de envios
           </button>
-          <button className={`tab ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")}>
-            Histórico por conversa
-          </button>
           <button className={`tab ${tab === "search" ? "active" : ""}`} onClick={() => setTab("search")}>
             Busca de mensagens
           </button>
@@ -752,38 +770,29 @@ export default function Dashboard() {
               </>
             )}
 
-            {tab === "history" && (
-              <>
-                <div className="field mono">
-                  <label htmlFor="hid">ID conversa / remotejid</label>
-                  <input id="hid" value={historyId} onChange={(e) => setHistoryId(e.target.value)} placeholder="5511999999999" />
-                </div>
-                <div className="field mono">
-                  <label htmlFor="hsz">Quantidade</label>
-                  <input id="hsz" value={historySize} onChange={(e) => setHistorySize(e.target.value)} inputMode="numeric" />
-                </div>
-                <div className="field" style={{ gridColumn: "1 / -1" }}>
-                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", fontStyle: "italic" }}>
-                    Esta aba mostra mensagens enviadas/recebidas numa conversa. Mensagens apenas <strong>queued</strong> (ainda não enviadas) não aparecem aqui — use a aba <strong>Relatório</strong> para ver pendências.
-                  </p>
-                </div>
-              </>
-            )}
-
             {tab === "search" && (
               <>
                 <div className="field mono">
-                  <label htmlFor="sph">Telefone</label>
-                  <input id="sph" value={searchPhone} onChange={(e) => setSearchPhone(e.target.value)} placeholder="5511999999999" />
+                  <label>Telefone</label>
+                  <input value={searchPhone} onChange={e => setSearchPhone(e.target.value)} placeholder="5511999999999" />
                 </div>
                 <div className="field mono">
-                  <label htmlFor="sidsms">ID SMS</label>
-                  <input id="sidsms" value={searchIdSms} onChange={(e) => setSearchIdSms(e.target.value)} placeholder="117994005" inputMode="numeric" />
+                  <label>ID SMS</label>
+                  <input value={searchIdSms} onChange={e => setSearchIdSms(e.target.value)} placeholder="117994005" inputMode="numeric" />
                 </div>
-                <div className="field" style={{ gridColumn: "1 / -1" }}>
-                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", fontStyle: "italic" }}>
-                    Busca via <code style={{ fontStyle: "normal" }}>/queued-ledger/stats</code> filtrando por telefone e/ou ID SMS. Mostra pendentes, falhas e amostras. Selecione a instância antes de buscar.
-                  </p>
+                <div className="field mono">
+                  <label>Limite (máx 100)</label>
+                  <input value={searchLimit} onChange={e => setSearchLimit(e.target.value)} inputMode="numeric" />
+                </div>
+                <div className="field" style={{ gridColumn: "1 / -1", display:"flex", flexDirection:"column", gap:6 }}>
+                  <label className="check" style={{textTransform:"none",letterSpacing:0}}>
+                    <input type="checkbox" checked={searchIncludeTotal} onChange={e => setSearchIncludeTotal(e.target.checked)} style={{width:14,height:14,accentColor:"var(--accent)"}} />
+                    <span>Contar total (mais lento) <span style={{color:"var(--muted-2)",fontSize:11.5,marginLeft:6}}>— inclui total/totalPages na resposta</span></span>
+                  </label>
+                  <label className="check" style={{textTransform:"none",letterSpacing:0}}>
+                    <input type="checkbox" checked={searchBody} onChange={e => setSearchBody(e.target.checked)} style={{width:14,height:14,accentColor:"var(--accent)"}} />
+                    <span>Buscar no corpo da mensagem (searchBody) <span style={{color:"var(--muted-2)",fontSize:11.5,marginLeft:6}}>— para busca em texto, não só telefone/id</span></span>
+                  </label>
                 </div>
               </>
             )}
@@ -803,6 +812,14 @@ export default function Dashboard() {
           </div>
         )}
 
+        {tab === "search" && (
+          <details className="raw" style={{marginTop:14}}>
+            <summary>Busca avançada (JSON do corpo)</summary>
+            <textarea value={searchJSON} onChange={e => setSearchJSON(e.target.value)}
+              placeholder='{ "phone": "5511999999999", "pageSize": 50 }'
+              style={{width:"100%",minHeight:100,marginTop:12,background:"var(--surface)",color:"var(--text)",border:"1px solid var(--border)",borderRadius:"7px",padding:12,fontFamily:"var(--mono)",fontSize:12.5}} />
+          </details>
+        )}
 
         <div style={{ marginTop: 18 }}>
           {error && <div className="error-box">{error}</div>}
@@ -828,23 +845,33 @@ export default function Dashboard() {
               </div>
             ))}
 
-          {!loading && tab === "history" &&
-            (historyData ? (
-              <ResultView data={historyData} />
+          {!loading && tab === "search" && (
+            searchData ? (
+              <SearchResultView
+                data={searchData}
+                searchPage={searchPage}
+                onNextPage={async (nextPage) => {
+                  setSearchPage(nextPage);
+                  setLoading(true);
+                  setError("");
+                  try {
+                    setSearchData(await postJSON("/api/gateway/search", buildSearchBody(nextPage), null));
+                  } catch(e) {
+                    if (e.message.includes("missing_search_filter")) {
+                      setError("Filtro inválido: informe telefone, consumer/fila, ID SMS ou texto.");
+                    } else if (e.message.includes("message_search_timeout")) {
+                      setError("O gateway excedeu o timeout interno de busca (8s). Refine os filtros ou tente novamente.");
+                    } else {
+                      setError(e.message);
+                    }
+                  }
+                  finally { setLoading(false); }
+                }}
+              />
             ) : (
-              !cancelled && <div className="empty">
-                Informe o ID da conversa e clique em "Buscar histórico".
-              </div>
-            ))}
-
-          {!loading && tab === "search" &&
-            (searchData ? (
-              <StatsReport data={searchData} />
-            ) : (
-              !cancelled && <div className="empty">
-                Informe o telefone ou ID SMS e clique em "Buscar mensagens".
-              </div>
-            ))}
+              !cancelled && <div className="empty">Informe telefone, consumer/fila ou ID SMS e clique em "Buscar mensagens".</div>
+            )
+          )}
 
           {tab === "cancel" && (
             <CancelPanel

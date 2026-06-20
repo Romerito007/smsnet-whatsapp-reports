@@ -141,6 +141,7 @@ export default function Dashboard() {
   const [committedPort, setCommittedPort] = useState("");
 
   // Derived from selected instance (readonly in querybar)
+  const [hostInst, setHostInst] = useState("");
   const [port, setPort] = useState("");
   const [wid, setWid] = useState("");
   const [consumer, setConsumer] = useState("");
@@ -253,6 +254,7 @@ export default function Dashboard() {
   function clearSelection() {
     setSelectedInstance(null);
     setSelectedKey("");
+    setHostInst("");
     setPort(defaultPort ? String(defaultPort) : "");
     setWid("");
     setConsumer("");
@@ -268,6 +270,7 @@ export default function Dashboard() {
     if (!item) return;
     setSelectedInstance(item);
     setSelectedKey(value);
+    setHostInst(item.srvHost || "");
     setPort(String(item.srvPort));
     setWid(item.wid != null ? String(item.wid) : "");
     setConsumer(item.consumerId != null ? String(item.consumerId) : "");
@@ -288,6 +291,7 @@ export default function Dashboard() {
     if (dateEnd) body[ke] = toISO(dateEnd);
     body._port = effectivePort;
     body._wid = effectiveWid || undefined;
+    body._host = hostInst || undefined;
   }
 
   function buildStatsBody() {
@@ -333,6 +337,7 @@ export default function Dashboard() {
     if (body.limit == null && Number(searchLimit) > 0) body.limit = Number(searchLimit);
     body._port = effectivePort;
     body._wid = w || undefined;
+    body._host = hostInst || undefined;
     return body;
   }
 
@@ -362,6 +367,7 @@ export default function Dashboard() {
             size: Number(historySize) > 0 ? Number(historySize) : 50,
             _port: effectivePort,
             _wid: effectiveWid || undefined,
+            _host: hostInst || undefined,
           })
         );
       } else if (tab === "search") {

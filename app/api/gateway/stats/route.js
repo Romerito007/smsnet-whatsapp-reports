@@ -5,8 +5,10 @@ export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const port = body._port;
   const wid = body._wid;
+  const host = body._host;
   delete body._port;
   delete body._wid;
+  delete body._host;
 
   if (!wid) {
     return NextResponse.json(
@@ -23,12 +25,13 @@ export async function POST(request) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       },
-      { wid, port }
+      { wid, port, host }
     );
     return NextResponse.json(data ?? { error: "Resposta vazia do gateway." }, {
       status: ok ? 200 : status,
     });
   } catch (e) {
+    console.error("stats route error:", e.message);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

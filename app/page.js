@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import StatsReport from "@/components/StatsReport";
 import CancelPanel from "@/components/CancelPanel";
 import DataTable from "@/components/DataTable";
+import ThemeToggle from "@/components/ThemeToggle";
 import { fmt } from "@/components/format";
 
 const ERROR_CLASSES = [
@@ -405,9 +406,12 @@ export default function Dashboard() {
             <small>Relatórios WhatsApp</small>
           </span>
         </div>
-        <button className="btn-ghost" onClick={logout}>
-          Sair
-        </button>
+        <div className="topbar-actions">
+          <ThemeToggle />
+          <button className="btn-ghost" onClick={logout}>
+            Sair
+          </button>
+        </div>
       </div>
 
       <div className="container">

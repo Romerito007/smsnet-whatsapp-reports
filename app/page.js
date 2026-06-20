@@ -121,8 +121,6 @@ const READONLY_STYLE = { color: "var(--muted)", background: "var(--surface-2)", 
 export default function Dashboard() {
   const router = useRouter();
 
-  // Gateway host info
-  const [host, setHost] = useState("");
   const [defaultPort, setDefaultPort] = useState("");
 
   // Instance selector
@@ -227,7 +225,6 @@ export default function Dashboard() {
     fetch("/api/instances")
       .then((r) => r.json())
       .then((d) => {
-        if (d.host) setHost(d.host);
         if (d.defaultPort) setDefaultPort(d.defaultPort);
       })
       .catch(() => {})
@@ -410,12 +407,6 @@ export default function Dashboard() {
       <div className="container">
         {/* ── Instancebar ── */}
         <div className="instancebar">
-          {/* Host (readonly) */}
-          <div className="field">
-            <label htmlFor="gw-host">Host do gateway</label>
-            <input id="gw-host" value={host} readOnly placeholder="carregando…" />
-          </div>
-
           {/* Server-side search: WID, Consumer, Port */}
           <div className="field mono">
             <label htmlFor="sw-wid">WID</label>

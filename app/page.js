@@ -302,7 +302,8 @@ export default function Dashboard() {
     setSelectedKey(value);
     setWid(item.wid != null ? String(item.wid) : "");
     setConsumer(item.consumerId != null ? String(item.consumerId) : "");
-    setQueueNames(item.queueName ?? `consumer_${item.consumerId}`);
+    const rawQueue = item.queueName ?? `consumer_${item.consumerId}`;
+    setQueueNames(rawQueue.replace(/ /g, "_"));
   }
 
   function applyShared(body, { includeWids = false } = {}) {
@@ -340,7 +341,7 @@ export default function Dashboard() {
     if (errorClass) body.errorClass = errorClass;
     if (errorContains.trim()) body.errorContains = errorContains.trim();
     if (previewType) body.previewType = previewType;
-    if (phone.trim()) body.phones = [phone.trim()];
+    if (phone.trim()) body.phone = phone.trim();
     return body;
   }
 

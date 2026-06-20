@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { gatewayFetch } from "@/lib/gateway";
 
 export async function POST(request) {
-  const { id, size, _port, _wid } = await request.json().catch(() => ({}));
+  const { id, size, _port, _wid, _host } = await request.json().catch(() => ({}));
 
   if (!_wid) {
     return NextResponse.json(
@@ -22,12 +22,13 @@ export async function POST(request) {
     const { ok, status, data } = await gatewayFetch(
       `/messages/history/${encodeURIComponent(id)}/${sz}`,
       { method: "GET" },
-      { wid: _wid, port: _port }
+      { wid: _wid, port: _port, host: _host }
     );
     return NextResponse.json(data ?? { error: "Resposta vazia do gateway." }, {
       status: ok ? 200 : status,
     });
   } catch (e) {
+    console.error("history route error:", e.message);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

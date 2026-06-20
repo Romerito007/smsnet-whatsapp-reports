@@ -115,6 +115,7 @@ export default function Dashboard() {
 
   const [host, setHost] = useState("");
   const [port, setPort] = useState("");
+  const [defaultPort, setDefaultPort] = useState("");
 
   // Instance selector
   const [instances, setInstances] = useState([]);
@@ -215,7 +216,7 @@ export default function Dashboard() {
       .then((r) => r.json())
       .then((d) => {
         if (d.host) setHost(d.host);
-        if (d.defaultPort) setPort(d.defaultPort);
+        if (d.defaultPort) { setDefaultPort(d.defaultPort); setPort(d.defaultPort); }
       })
       .catch(() => {})
       .finally(() => {
@@ -243,23 +244,27 @@ export default function Dashboard() {
   );
 
   function clearSelection() {
-    setSelectedKey("");
     setSelectedInstance(null);
+    setSelectedKey("");
+    setPort(defaultPort ? String(defaultPort) : "");
+    setWid("");
+    setConsumer("");
+    setQueueNames("");
   }
 
   function handleSelectInstance(value) {
-    setSelectedKey(value);
     if (!value) {
-      setSelectedInstance(null);
+      clearSelection();
       return;
     }
     const item = instances.find((it) => instanceKey(it) === value);
     if (!item) return;
     setSelectedInstance(item);
-    setPort(String(item.srvPort));
-    if (item.consumerId != null) setConsumer(String(item.consumerId));
-    if (item.wid) setWid(String(item.wid));
-    if (item.queueName) setQueueNames(item.queueName);
+    setSelectedKey(value);
+    setPort(item.srvPort != null ? String(item.srvPort) : "");
+    setWid(item.wid != null ? String(item.wid) : "");
+    setConsumer(item.consumerId != null ? String(item.consumerId) : "");
+    setQueueNames(item.queueName ?? "");
   }
 
   function handlePortChange(v) {

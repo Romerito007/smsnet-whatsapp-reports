@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import StatsReport from "@/components/StatsReport";
 import CancelPanel from "@/components/CancelPanel";
@@ -55,6 +55,31 @@ function findArray(obj) {
   return null;
 }
 
+function instanceKey(item) {
+  return `${item.srvPort}|${item.consumerId ?? ""}|${item.wid ?? ""}`;
+}
+
+function instanceLabel(item) {
+  let label = `:${item.srvPort} · ${item.name || item.from || "—"} · cons ${item.consumerId ?? "—"}`;
+  if (item.wid) label += ` · wid ${item.wid}`;
+  if (item.status) label += ` · ${item.status}`;
+  return label;
+}
+
+function matchesFilter(item, filter) {
+  if (!filter) return true;
+  const q = filter.toLowerCase();
+  return [
+    item.name,
+    item.from,
+    item.wid,
+    item.consumerId != null ? String(item.consumerId) : null,
+    item.srvPort != null ? String(item.srvPort) : null,
+    item.queueName,
+    item.srvName,
+  ].some((v) => v && v.toLowerCase().includes(q));
+}
+
 function ResultView({ data }) {
   if (!data) return null;
   if (data.error) return <div className="error-box">{fmt(data.error)}</div>;
@@ -91,7 +116,15 @@ export default function Dashboard() {
   const [host, setHost] = useState("");
   const [port, setPort] = useState("");
 
-  // Filtros compartilhados (stats / histórico / busca)
+  // Instance selector
+  const [instances, setInstances] = useState([]);
+  const [instancesLoading, setInstancesLoading] = useState(false);
+  const [instancesError, setInstancesError] = useState("");
+  const [instanceFilter, setInstanceFilter] = useState("");
+  const [onlyOnline, setOnlyOnline] = useState(true);
+  const [selectedKey, setSelectedKey] = useState("");
+
+  // Filtros compartilhados
   const [wid, setWid] = useState("");
   const [consumer, setConsumer] = useState("");
   const [queueNames, setQueueNames] = useState("");
@@ -125,6 +158,45 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const loadInstances = useCallback(async () => {
+    setInstancesLoading(true);
+    setInstancesError("");
+    try {
+      const allItems = [];
+      let pageNumber = 1;
+      const pageSize = 200;
+      for (let i = 0; i < 25; i++) {
+        const body = { pageNumber, pageSize };
+        if (onlyOnline) body.status = "ONLINE";
+        const resp = await postJSON("/api/gateway/instances", body);
+        const items = Array.isArray(resp.items)
+          ? resp.items
+          : Array.isArray(resp.data)
+          ? resp.data
+          : Array.isArray(resp.rows)
+          ? resp.rows
+          : [];
+        allItems.push(...items.filter((it) => it.srvPort != null));
+        if (!resp.pagination?.hasNext) break;
+        pageNumber++;
+      }
+      // Sort: ONLINE first, then by srvPort asc
+      allItems.sort((a, b) => {
+        const aOnline = (a.status || "").toUpperCase() === "ONLINE" ? 0 : 1;
+        const bOnline = (b.status || "").toUpperCase() === "ONLINE" ? 0 : 1;
+        if (aOnline !== bOnline) return aOnline - bOnline;
+        return (a.srvPort ?? 0) - (b.srvPort ?? 0);
+      });
+      setInstances(allItems);
+    } catch (e) {
+      if (e.message !== "Sessão expirada.") {
+        setInstancesError(e.message);
+      }
+    } finally {
+      setInstancesLoading(false);
+    }
+  }, [onlyOnline]);
+
   useEffect(() => {
     fetch("/api/instances")
       .then((r) => r.json())
@@ -132,10 +204,32 @@ export default function Dashboard() {
         if (d.host) setHost(d.host);
         if (d.defaultPort) setPort(d.defaultPort);
       })
-      .catch(() => {});
-  }, []);
+      .catch(() => {})
+      .finally(() => {
+        loadInstances();
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    loadInstances();
+  }, [loadInstances]);
 
   const effectivePort = port.trim();
+
+  const filteredInstances = instances.filter((it) =>
+    matchesFilter(it, instanceFilter)
+  );
+
+  function handleSelectInstance(value) {
+    setSelectedKey(value);
+    if (!value) return;
+    const item = instances.find((it) => instanceKey(it) === value);
+    if (!item) return;
+    setPort(String(item.srvPort));
+    if (item.consumerId != null) setConsumer(String(item.consumerId));
+    if (item.wid) setWid(String(item.wid));
+    if (item.queueName) setQueueNames(item.queueName);
+  }
 
   function applyShared(body) {
     if (wid.trim()) body.wids = [wid.trim()];
@@ -277,15 +371,79 @@ export default function Dashboard() {
               placeholder="carregando…"
             />
           </div>
-          <div className="field mono">
+
+          <div className="field">
+            <label htmlFor="only-online" style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", letterSpacing: 0, fontSize: 12 }}>
+              <input
+                id="only-online"
+                type="checkbox"
+                checked={onlyOnline}
+                onChange={(e) => setOnlyOnline(e.target.checked)}
+                style={{ width: 14, height: 14, accentColor: "var(--accent)", flexShrink: 0 }}
+              />
+              Somente ONLINE
+            </label>
+            <input
+              value={instanceFilter}
+              onChange={(e) => setInstanceFilter(e.target.value)}
+              placeholder="Filtrar instâncias…"
+              style={{ marginTop: 2 }}
+            />
+          </div>
+
+          <div className="field" style={{ flex: 2 }}>
+            <label htmlFor="inst-select">
+              Instância
+              {instances.length > 0 && (
+                <span style={{ color: "var(--muted-2)", fontWeight: 400, marginLeft: 6 }}>
+                  ({filteredInstances.length} de {instances.length})
+                </span>
+              )}
+            </label>
+            <select
+              id="inst-select"
+              value={selectedKey}
+              onChange={(e) => handleSelectInstance(e.target.value)}
+              disabled={instancesLoading}
+            >
+              <option value="">— informar porta manualmente —</option>
+              {filteredInstances.map((item) => {
+                const key = instanceKey(item);
+                return (
+                  <option key={key} value={key}>
+                    {instanceLabel(item)}
+                  </option>
+                );
+              })}
+            </select>
+            {instancesError && (
+              <span style={{ color: "var(--crit)", fontSize: 11, marginTop: 2 }}>
+                {instancesError}
+              </span>
+            )}
+          </div>
+
+          <div className="field mono" style={{ minWidth: 120 }}>
             <label htmlFor="gw-port">Porta da instância *</label>
             <input
               id="gw-port"
               value={port}
-              onChange={(e) => setPort(e.target.value)}
+              onChange={(e) => { setPort(e.target.value); setSelectedKey(""); }}
               placeholder="ex.: 10005"
               inputMode="numeric"
             />
+          </div>
+
+          <div className="field" style={{ justifyContent: "flex-end" }}>
+            <label style={{ visibility: "hidden", fontSize: 11 }}>.</label>
+            <button
+              className="btn-ghost"
+              onClick={loadInstances}
+              disabled={instancesLoading}
+              style={{ whiteSpace: "nowrap" }}
+            >
+              {instancesLoading ? "Carregando…" : "Recarregar"}
+            </button>
           </div>
         </div>
 

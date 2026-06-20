@@ -157,6 +157,7 @@ export default function Dashboard() {
   const [pageSize, setPageSize] = useState("100");
 
   // Stats advanced
+  const [filterByWid, setFilterByWid] = useState(false);
   const [errorClass, setErrorClass] = useState("");
   const [errorContains, setErrorContains] = useState("");
   const [previewType, setPreviewType] = useState("");
@@ -278,9 +279,8 @@ export default function Dashboard() {
     setQueueNames(item.queueName ?? `consumer_${item.consumerId}`);
   }
 
-  function applyShared(body) {
-    const w = effectiveWid;
-    if (w) body.wids = [w];
+  function applyShared(body, { includeWids = false } = {}) {
+    if (includeWids && effectiveWid) body.wids = [effectiveWid];
     const ids = parseConsumerIds(consumer);
     if (ids.length) body.consumerIds = ids;
     if (queueNames.trim()) {
@@ -311,7 +311,7 @@ export default function Dashboard() {
       includeSlowest: true,
       includeSamples: true,
     };
-    applyShared(body);
+    applyShared(body, { includeWids: filterByWid });
     if (errorClass) body.errorClass = errorClass;
     if (errorContains.trim()) body.errorContains = errorContains.trim();
     if (previewType) body.previewType = previewType;
@@ -328,16 +328,17 @@ export default function Dashboard() {
         throw new Error("JSON avançado de busca inválido.");
       }
     }
-    const w = effectiveWid;
-    if (w && body.wid == null && body.wids == null) body.wid = w;
     if (body.consumerId == null && body.consumerIds == null) {
       const ids = parseConsumerIds(consumer);
       if (ids.length) body.consumerId = ids[0];
     }
+    if (body.queueName == null && body.queueNames == null && queueNames.trim()) {
+      body.queueName = queueNames.trim().split(",")[0].trim();
+    }
     if (searchPhone.trim() && body.phone == null) body.phone = searchPhone.trim();
     if (body.limit == null && Number(searchLimit) > 0) body.limit = Number(searchLimit);
     body._port = effectivePort;
-    body._wid = w || undefined;
+    body._wid = effectiveWid || undefined;
     body._host = hostInst || undefined;
     return body;
   }
@@ -688,6 +689,25 @@ export default function Dashboard() {
                   <label htmlFor="ecn">Erro contém</label>
                   <input id="ecn" value={errorContains} onChange={(e) => setErrorContains(e.target.value)} placeholder="ex.: 463" />
                 </div>
+                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                  <label className="check" style={{ textTransform: "none", letterSpacing: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={filterByWid}
+                      onChange={(e) => setFilterByWid(e.target.checked)}
+                      style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
+                    />
+                    <span>
+                      Filtrar por WID processador (claimed/sent)
+                      <span
+                        style={{ color: "var(--muted-2)", fontFamily: "var(--sans)", fontSize: 11.5, marginLeft: 8 }}
+                        title="Mostra só o que este WID já processou; oculta mensagens pendentes (queued) ainda não claimadas."
+                      >
+                        — mostra só o que este WID já processou; oculta pendentes ainda não claimadas
+                      </span>
+                    </span>
+                  </label>
+                </div>
               </>
             )}
 
@@ -700,6 +720,11 @@ export default function Dashboard() {
                 <div className="field mono">
                   <label htmlFor="hsz">Quantidade</label>
                   <input id="hsz" value={historySize} onChange={(e) => setHistorySize(e.target.value)} inputMode="numeric" />
+                </div>
+                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", fontStyle: "italic" }}>
+                    Esta aba mostra mensagens enviadas/recebidas numa conversa. Mensagens apenas <strong>queued</strong> (ainda não enviadas) não aparecem aqui — use a aba <strong>Relatório</strong> para ver pendências.
+                  </p>
                 </div>
               </>
             )}
